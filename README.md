@@ -9,6 +9,19 @@ A Flask web service that generates beautiful LUNA candlestick charts and uploads
 - 🌐 RESTful API endpoints
 - 📱 Multiple timeframes (1d, 7d, 14d, 30d, 90d, 180d, 365d, max)
 - 🎨 CoinMarketCap-style dark theme
+- 📈 **Advanced Technical Analysis:**
+  - Automatic trend line detection (support/resistance)
+  - Moving averages (MA20, MA50)
+  - RSI indicator with overbought/oversold levels
+  - Chart pattern recognition (triangles, flags)
+  - Volume analysis
+- 🎨 **Professional Styling:**
+  - Premium dark theme with custom color schemes
+  - High-resolution output (1920x1080, 3x scale)
+  - Professional annotations and price markers
+  - RSI zones with gradient fills
+  - Enhanced typography and spacing
+  - Interactive hover tooltips
 
 ## API Endpoints
 
@@ -36,6 +49,30 @@ Generate and upload a LUNA chart for the specified number of days.
     "price_change_percent": 0.75,
     "data_points": 48,
     "time_range": "2025-01-09 00:00 to 2025-01-09 23:59"
+  },
+  "technical_analysis": {
+    "rsi": {
+      "current": 45.2,
+      "signal": "Neutral"
+    },
+    "moving_averages": {
+      "ma20": 0.0132,
+      "ma50": 0.0131,
+      "trend": "Bullish"
+    },
+    "trend_lines": {
+      "count": 2,
+      "types": ["support", "resistance"]
+    },
+    "patterns": [
+      {
+        "type": "Ascending Triangle",
+        "description": "Horizontal resistance with rising support - bullish pattern",
+        "confidence": "Medium"
+      }
+    ],
+    "support_levels": [0.0130],
+    "resistance_levels": [0.0138]
   }
 }
 ```
