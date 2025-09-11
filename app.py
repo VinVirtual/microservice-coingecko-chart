@@ -2428,7 +2428,7 @@ def create_plotly_candlestick(days=1):
         fig.add_annotation(
             x=timestamps[-1],
             y=max(highs) * 0.95,
-            text=f"<b>🧠 LUNA Analysis</b><br><span style='font-size:10px'>{len(patterns)} patterns analyzed</span>",
+            text=f"<b>LUNA Analysis</b><br><span style='font-size:10px'>{len(patterns)} patterns analyzed</span>",
             showarrow=False,
             bgcolor=colors['surface'],
             bordercolor=colors['accent'],
