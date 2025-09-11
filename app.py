@@ -1223,7 +1223,9 @@ def generate_individual_summary(individual_charts, all_analyses):
         
         for chart in individual_charts:
             if chart['success']:
-                signal = chart['technical_analysis'].get('signal', 'Neutral')
+                # Get signal from LLM analysis
+                llm_analysis = chart['technical_analysis'].get('llm_analysis', {})
+                signal = llm_analysis.get('signal', 'Neutral')
                 if signal == 'Bullish':
                     bullish_count += 1
                 elif signal == 'Bearish':
@@ -1232,12 +1234,14 @@ def generate_individual_summary(individual_charts, all_analyses):
                     neutral_count += 1
                 
                 # Collect pattern info
-                if 'selected_pattern' in chart['technical_analysis']:
+                selected_pattern = llm_analysis.get('selected_pattern', 'Unknown')
+                confidence = llm_analysis.get('confidence', 'Medium')
+                if selected_pattern != 'Unknown':
                     patterns_detected.append({
                         'timeframe': chart['timeframe'],
-                        'pattern': chart['technical_analysis']['selected_pattern'],
+                        'pattern': selected_pattern,
                         'signal': signal,
-                        'confidence': chart['technical_analysis'].get('confidence', 'Medium')
+                        'confidence': confidence
                     })
                 
                 # Collect market data
