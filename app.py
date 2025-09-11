@@ -1587,16 +1587,32 @@ def create_plotly_candlestick(days=1):
         'accent': '#00D4AA'
     }
     
-    # Create subplots with RSI panel
+    # Create subplots with RSI panel - adjust proportions for better candlestick visibility
+    # For shorter timeframes (1d, 30d), give more space to the price chart
+    if days <= 30:
+        row_heights = [0.6, 0.15, 0.25]  # More space for price chart
+        chart_height = 1000  # Increased height for better visibility
+    else:
+        row_heights = [0.5, 0.2, 0.3]  # Standard proportions for longer timeframes
+        chart_height = 900
+    
     fig = make_subplots(
         rows=3, cols=1,
         shared_xaxes=True,
         vertical_spacing=0.05,
         subplot_titles=('LUNA/USD Price', 'Volume', 'RSI'),
-        row_heights=[0.5, 0.2, 0.3]
+        row_heights=row_heights
     )
     
-    # Add professional candlestick chart
+    # Add professional candlestick chart with enhanced visibility for shorter timeframes
+    # Adjust candlestick styling based on timeframe for better visibility
+    if days <= 30:
+        line_width = 2.5  # Thicker lines for 1d and 30d charts
+        whisker_width = 0.9  # Wider whiskers for better visibility (max 1.0)
+    else:
+        line_width = 1.5  # Standard width for longer timeframes
+        whisker_width = 0.8
+    
     fig.add_trace(
         go.Candlestick(
             x=timestamps,
@@ -1609,8 +1625,8 @@ def create_plotly_candlestick(days=1):
             decreasing_line_color=colors['bearish'],
             increasing_fillcolor=colors['bullish'],
             decreasing_fillcolor=colors['bearish'],
-            line=dict(width=1.5),
-            whiskerwidth=0.8
+            line=dict(width=line_width),
+            whiskerwidth=whisker_width
         ),
         row=1, col=1
     )
@@ -2207,7 +2223,7 @@ def create_plotly_candlestick(days=1):
             family='Arial, sans-serif',
             size=12
         ),
-        height=900,  # Increased height for professional look
+        height=chart_height,  # Dynamic height based on timeframe
         showlegend=True,
         legend=dict(
             orientation="h",
@@ -2243,6 +2259,17 @@ def create_plotly_candlestick(days=1):
         mirror=True
     )
     
+    # Calculate proper Y-axis range for price chart with padding
+    price_min = min(lows)
+    price_max = max(highs)
+    price_range = price_max - price_min
+    
+    # Use more generous padding for shorter timeframes for better candlestick visibility
+    if days <= 30:
+        padding = price_range * 0.15  # 15% padding for 1d and 30d charts
+    else:
+        padding = price_range * 0.1   # 10% padding for longer timeframes
+    
     fig.update_yaxes(
         title_text="<b>Price (USD)</b>",
         showgrid=True,
@@ -2252,8 +2279,13 @@ def create_plotly_candlestick(days=1):
         tickfont=dict(size=10, color=colors['text_secondary']),
         linecolor=colors['grid'],
         mirror=True,
+        range=[price_min - padding, price_max + padding],  # Set proper range with padding
         row=1, col=1
     )
+    
+    # Calculate proper Y-axis range for volume chart with padding
+    volume_max = max(volumes)
+    volume_padding = volume_max * 0.1  # 10% padding above volume
     
     fig.update_yaxes(
         title_text="<b>Volume</b>",
@@ -2264,6 +2296,7 @@ def create_plotly_candlestick(days=1):
         tickfont=dict(size=10, color=colors['text_secondary']),
         linecolor=colors['grid'],
         mirror=True,
+        range=[0, volume_max + volume_padding],  # Set proper range with padding
         row=2, col=1
     )
     
@@ -2413,7 +2446,7 @@ def create_plotly_candlestick(days=1):
     img_bytes = fig.to_image(
         format="png", 
         width=1920,  # Higher resolution
-        height=1080,  # 16:9 aspect ratio
+        height=int(chart_height * 1.2),  # Dynamic height based on timeframe
         scale=3,  # Higher scale for crisp text
         engine="kaleido"
     )
