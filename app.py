@@ -5,12 +5,14 @@ Generates candlestick charts and uploads to Supabase S3
 """
 
 from flask import Flask, jsonify, request, send_file
+from flask_cors import CORS
 import plotly.graph_objects as go
 import plotly.io as pio
 import requests
 import datetime
 import os
 import io
+from io import BytesIO
 import numpy as np
 from plotly.subplots import make_subplots
 from supabase import create_client, Client
@@ -18,11 +20,14 @@ from dotenv import load_dotenv
 import base64
 import openai
 import json
+from PIL import Image
+
 
 # Load environment variables
 load_dotenv()
 
 app = Flask(__name__)
+CORS(app)  # Enable CORS for all routes
 
 def get_supabase_client():
     """Initialize Supabase client with Service Role Key for uploads"""
@@ -307,6 +312,10 @@ def detect_double_tops_bottoms(highs, lows, closes, timestamps):
             peak_idx = np.argmax(highs[i:second_trough_idx]) + i
             peak_price = highs[peak_idx]
             
+            # Create visual curves for the two bottoms
+            bottom1_curve = create_bottom_curve(i, first_trough, timestamps, lows, 'left')
+            bottom2_curve = create_bottom_curve(second_trough_idx, second_trough, timestamps, lows, 'right')
+            
             patterns.append({
                 'type': 'Double Bottom',
                 'description': 'Bullish reversal pattern - two equal troughs',
@@ -315,11 +324,79 @@ def detect_double_tops_bottoms(highs, lows, closes, timestamps):
                     'first_trough': {'idx': i, 'price': first_trough, 'time': timestamps[i]},
                     'second_trough': {'idx': second_trough_idx, 'price': second_trough, 'time': timestamps[second_trough_idx]},
                     'peak': {'idx': peak_idx, 'price': peak_price, 'time': timestamps[peak_idx]},
-                    'target': peak_price + (peak_price - first_trough)
+                    'target': peak_price + (peak_price - first_trough),
+                    'bottom1_curve': bottom1_curve,
+                    'bottom2_curve': bottom2_curve,
+                    'neckline': {
+                        'start': {'x': timestamps[i], 'y': peak_price},
+                        'end': {'x': timestamps[second_trough_idx], 'y': peak_price}
+                    }
                 }
             })
     
     return patterns
+
+def create_bottom_curve(center_idx, center_price, timestamps, lows, side):
+    """Create a curved line around a bottom point for visual pattern highlighting"""
+    curve_points = []
+    window = 4  # Points around the center
+    
+    start_idx = max(0, center_idx - window)
+    end_idx = min(len(timestamps) - 1, center_idx + window)
+    
+    for i in range(start_idx, end_idx + 1):
+        # Create a gentle curve that dips at the center
+        distance = abs(i - center_idx)
+        if distance == 0:
+            curve_factor = 1.0  # Exact center
+        else:
+            curve_factor = 1 - (distance / window) * 0.15  # Gentle dip
+        
+        curve_price = center_price * curve_factor
+        curve_points.append({
+            'x': timestamps[i],
+            'y': curve_price
+        })
+    
+    return curve_points
+
+def create_cup_curve(start_idx, end_idx, cup_start, cup_bottom, cup_end, timestamps, closes):
+    """Create a curved line for cup and handle pattern visualization"""
+    curve_points = []
+    
+    for i in range(start_idx, end_idx + 1):
+        if i < len(timestamps):
+            # Create a U-shaped curve
+            progress = (i - start_idx) / (end_idx - start_idx)
+            
+            # U-shape: start high, dip in middle, recover at end
+            if progress < 0.5:
+                # First half: decline to bottom
+                curve_factor = 1 - (progress * 2) * 0.3  # 30% dip
+            else:
+                # Second half: recovery from bottom
+                curve_factor = 0.7 + ((progress - 0.5) * 2) * 0.3  # Recovery to 100%
+            
+            curve_price = cup_start * curve_factor
+            curve_points.append({
+                'x': timestamps[i],
+                'y': curve_price
+            })
+    
+    return curve_points
+
+def create_trend_line(timestamps, slope, start_price):
+    """Create a trend line for visualization"""
+    line_points = []
+    
+    for i, timestamp in enumerate(timestamps):
+        price = start_price + (slope * i)
+        line_points.append({
+            'x': timestamp,
+            'y': price
+        })
+    
+    return line_points
 
 def detect_cup_and_handle(highs, lows, closes, timestamps):
     """Detect Cup and Handle pattern"""
@@ -350,6 +427,9 @@ def detect_cup_and_handle(highs, lows, closes, timestamps):
             cup_recovery > 0.3 and  # Cup recovers at least 30%
             handle_retracement > 0.02 and handle_retracement < 0.2):  # Handle retraces 2-20%
             
+            # Create cup curve for visualization
+            cup_curve = create_cup_curve(i-10, i+4, cup_start, cup_bottom, cup_end, timestamps, closes)
+            
             patterns.append({
                 'type': 'Cup and Handle',
                 'description': 'Bullish continuation pattern - U-shaped cup with small handle',
@@ -360,7 +440,10 @@ def detect_cup_and_handle(highs, lows, closes, timestamps):
                     'cup_end': {'idx': i+4, 'price': cup_end, 'time': timestamps[i+4]},
                     'handle_start': {'idx': i+5, 'price': handle_start, 'time': timestamps[i+5]},
                     'handle_end': {'idx': i+9, 'price': handle_end, 'time': timestamps[i+9]},
-                    'target': cup_start + (cup_start - cup_bottom)
+                    'target': cup_start + (cup_start - cup_bottom),
+                    'cup_curve': cup_curve,
+                    'handle_start': {'x': timestamps[i+5], 'y': handle_start},
+                    'handle_end': {'x': timestamps[i+9], 'y': handle_end}
                 }
             })
             break
@@ -383,6 +466,11 @@ def detect_wedges(highs, lows, closes, timestamps):
         low_trend = np.polyfit(range(len(recent_lows)), recent_lows, 1)[0]
         
         if high_trend > 0 and low_trend > 0 and high_trend > low_trend:
+            # Create visual lines for rising wedge
+            recent_timestamps = timestamps[-10:]
+            upper_line = create_trend_line(recent_timestamps, high_trend, recent_highs[0])
+            lower_line = create_trend_line(recent_timestamps, low_trend, recent_lows[0])
+            
             patterns.append({
                 'type': 'Rising Wedge',
                 'description': 'Bearish reversal pattern - converging rising lines',
@@ -390,7 +478,9 @@ def detect_wedges(highs, lows, closes, timestamps):
                 'pattern_data': {
                     'resistance_line': {'slope': high_trend, 'start_price': recent_highs[0]},
                     'support_line': {'slope': low_trend, 'start_price': recent_lows[0]},
-                    'convergence': True
+                    'convergence': True,
+                    'upper_line': upper_line,
+                    'lower_line': lower_line
                 }
             })
     
@@ -400,6 +490,11 @@ def detect_wedges(highs, lows, closes, timestamps):
         low_trend = np.polyfit(range(len(recent_lows)), recent_lows, 1)[0]
         
         if high_trend < 0 and low_trend < 0 and abs(high_trend) > abs(low_trend):
+            # Create visual lines for falling wedge
+            recent_timestamps = timestamps[-10:]
+            upper_line = create_trend_line(recent_timestamps, high_trend, recent_highs[0])
+            lower_line = create_trend_line(recent_timestamps, low_trend, recent_lows[0])
+            
             patterns.append({
                 'type': 'Falling Wedge',
                 'description': 'Bullish reversal pattern - converging falling lines',
@@ -407,7 +502,9 @@ def detect_wedges(highs, lows, closes, timestamps):
                 'pattern_data': {
                     'resistance_line': {'slope': high_trend, 'start_price': recent_highs[0]},
                     'support_line': {'slope': low_trend, 'start_price': recent_lows[0]},
-                    'convergence': True
+                    'convergence': True,
+                    'upper_line': upper_line,
+                    'lower_line': lower_line
                 }
             })
     
@@ -646,6 +743,9 @@ def create_combined_multi_timeframe_chart(timeframe_results):
             'accent': '#00D4AA'
         }
         
+        # Track which pattern types we've already visualized to avoid duplicates across all timeframes
+        visualized_patterns = set()
+        
         # Plot each timeframe
         positions = [(1, 1), (1, 2), (2, 1), (2, 2)]
         for i, (tf_name, tf_data) in enumerate(timeframe_results.items()):
@@ -723,6 +823,231 @@ def create_combined_multi_timeframe_chart(timeframe_results):
                     font=dict(size=10, color=colors['text_primary']),
                     row=row, col=col
                 )
+            
+            # Add comprehensive pattern visualizations for all detected patterns
+            if 'patterns' in technical:
+                patterns = technical['patterns']
+                
+                for pattern in patterns:
+                    pattern_type = pattern['type']
+                    
+                    # Skip if we've already visualized this pattern type
+                    if pattern_type in visualized_patterns:
+                        continue
+                    
+                    # Double Bottom Pattern
+                    if pattern_type == 'Double Bottom' and 'pattern_data' in pattern:
+                        visualized_patterns.add(pattern_type)
+                        pattern_data = pattern['pattern_data']
+                        
+                        # Draw the two bottom curves
+                        if 'bottom1_curve' in pattern_data:
+                            curve1 = pattern_data['bottom1_curve']
+                            fig.add_trace(
+                                go.Scatter(
+                                    x=[point['x'] for point in curve1],
+                                    y=[point['y'] for point in curve1],
+                                    mode='lines',
+                                    name='Bottom 1 Curve',
+                                    line=dict(
+                                        color='#00D4AA',
+                                        width=3,
+                                        dash='dot'
+                                    ),
+                                    opacity=0.8,
+                                    showlegend=False,
+                                    hovertemplate="<b>Bottom 1 Curve</b><br>" +
+                                                 "Time: %{x}<br>" +
+                                                 "Price: $%{y:.4f}<br>" +
+                                                 "<extra></extra>"
+                                ),
+                                row=row, col=col
+                            )
+                        
+                        if 'bottom2_curve' in pattern_data:
+                            curve2 = pattern_data['bottom2_curve']
+                            fig.add_trace(
+                                go.Scatter(
+                                    x=[point['x'] for point in curve2],
+                                    y=[point['y'] for point in curve2],
+                                    mode='lines',
+                                    name='Bottom 2 Curve',
+                                    line=dict(
+                                        color='#00D4AA',
+                                        width=3,
+                                        dash='dot'
+                                    ),
+                                    opacity=0.8,
+                                    showlegend=False,
+                                    hovertemplate="<b>Bottom 2 Curve</b><br>" +
+                                                 "Time: %{x}<br>" +
+                                                 "Price: $%{y:.4f}<br>" +
+                                                 "<extra></extra>"
+                                ),
+                                row=row, col=col
+                            )
+                        
+                        # Draw the neckline
+                        if 'neckline' in pattern_data:
+                            neckline = pattern_data['neckline']
+                            fig.add_trace(
+                                go.Scatter(
+                                    x=[neckline['start']['x'], neckline['end']['x']],
+                                    y=[neckline['start']['y'], neckline['end']['y']],
+                                    mode='lines',
+                                    name='Neckline',
+                                    line=dict(
+                                        color='#FFD700',
+                                        width=4,
+                                        dash='dash'
+                                    ),
+                                    opacity=1.0,
+                                    showlegend=False,
+                                    hovertemplate="<b>Neckline Resistance</b><br>" +
+                                                 "Time: %{x}<br>" +
+                                                 "Price: $%{y:.4f}<br>" +
+                                                 "<extra></extra>"
+                                ),
+                                row=row, col=col
+                            )
+                            
+                            # Add neckline label
+                            fig.add_annotation(
+                                x=neckline['start']['x'],
+                                y=neckline['start']['y'],
+                                text="<b>Neckline</b>",
+                                showarrow=True,
+                                arrowhead=2,
+                                arrowsize=1,
+                                arrowwidth=2,
+                                arrowcolor='#FFD700',
+                                ax=20,
+                                ay=-30,
+                                bgcolor='rgba(255, 215, 0, 0.8)',
+                                bordercolor='#FFD700',
+                                borderwidth=1,
+                                font=dict(size=10, color='#000000'),
+                                row=row, col=col
+                            )
+                    
+                    # Head and Shoulders Pattern
+                    elif pattern_type == 'Head and Shoulders' and 'pattern_data' in pattern:
+                        visualized_patterns.add(pattern_type)
+                        pattern_data = pattern['pattern_data']
+                        
+                        # Draw the three peaks
+                        if 'left_shoulder' in pattern_data and 'head' in pattern_data and 'right_shoulder' in pattern_data:
+                            # Left shoulder
+                            ls = pattern_data['left_shoulder']
+                            fig.add_trace(
+                                go.Scatter(
+                                    x=[ls['time']],
+                                    y=[ls['price']],
+                                    mode='markers',
+                                    name='Left Shoulder',
+                                    marker=dict(
+                                        color='#FF6B6B',
+                                        size=8,
+                                        symbol='triangle-up'
+                                    ),
+                                    showlegend=False,
+                                    hovertemplate="<b>Left Shoulder</b><br>" +
+                                                 "Time: %{x}<br>" +
+                                                 "Price: $%{y:.4f}<br>" +
+                                                 "<extra></extra>"
+                                ),
+                                row=row, col=col
+                            )
+                            
+                            # Head
+                            head = pattern_data['head']
+                            fig.add_trace(
+                                go.Scatter(
+                                    x=[head['time']],
+                                    y=[head['price']],
+                                    mode='markers',
+                                    name='Head',
+                                    marker=dict(
+                                        color='#FF6B6B',
+                                        size=10,
+                                        symbol='triangle-up'
+                                    ),
+                                    showlegend=False,
+                                    hovertemplate="<b>Head</b><br>" +
+                                                 "Time: %{x}<br>" +
+                                                 "Price: $%{y:.4f}<br>" +
+                                                 "<extra></extra>"
+                                ),
+                                row=row, col=col
+                            )
+                            
+                            # Right shoulder
+                            rs = pattern_data['right_shoulder']
+                            fig.add_trace(
+                                go.Scatter(
+                                    x=[rs['time']],
+                                    y=[rs['price']],
+                                    mode='markers',
+                                    name='Right Shoulder',
+                                    marker=dict(
+                                        color='#FF6B6B',
+                                        size=8,
+                                        symbol='triangle-up'
+                                    ),
+                                    showlegend=False,
+                                    hovertemplate="<b>Right Shoulder</b><br>" +
+                                                 "Time: %{x}<br>" +
+                                                 "Price: $%{y:.4f}<br>" +
+                                                 "<extra></extra>"
+                                ),
+                                row=row, col=col
+                            )
+                            
+                            # Draw neckline
+                            if 'neckline' in pattern_data:
+                                neckline_price = pattern_data['neckline']
+                                # Create neckline from left shoulder to right shoulder
+                                left_time = pattern_data['left_shoulder']['time']
+                                right_time = pattern_data['right_shoulder']['time']
+                                fig.add_trace(
+                                    go.Scatter(
+                                        x=[left_time, right_time],
+                                        y=[neckline_price, neckline_price],
+                                        mode='lines',
+                                        name='Neckline',
+                                        line=dict(
+                                            color='#FFD700',
+                                            width=4,
+                                            dash='dash'
+                                        ),
+                                        opacity=1.0,
+                                        showlegend=False,
+                                        hovertemplate="<b>Neckline Support</b><br>" +
+                                                     "Time: %{x}<br>" +
+                                                     "Price: $%{y:.4f}<br>" +
+                                                     "<extra></extra>"
+                                    ),
+                                    row=row, col=col
+                                )
+                                
+                                # Add neckline label
+                                fig.add_annotation(
+                                    x=left_time,
+                                    y=neckline_price,
+                                    text="<b>Neckline</b>",
+                                    showarrow=True,
+                                    arrowhead=2,
+                                    arrowsize=1,
+                                    arrowwidth=2,
+                                    arrowcolor='#FFD700',
+                                    ax=20,
+                                    ay=30,
+                                    bgcolor='rgba(255, 215, 0, 0.8)',
+                                    bordercolor='#FFD700',
+                                    borderwidth=1,
+                                    font=dict(size=10, color='#000000'),
+                                    row=row, col=col
+                                )
         
         # Update layout for professional appearance
         fig.update_layout(
@@ -778,6 +1103,280 @@ def create_combined_multi_timeframe_chart(timeframe_results):
     except Exception as e:
         print(f"❌ Error creating combined chart: {e}")
         return None
+
+def create_collage_from_urls(chart_urls, timeframe_names):
+    """Download 4 chart images and stitch them into a 2x2 collage"""
+    try:
+        # Download images
+        images = []
+        for i, url in enumerate(chart_urls):
+            print(f"📥 Downloading {timeframe_names[i]} chart...")
+            response = requests.get(url)
+            if response.status_code == 200:
+                img = Image.open(BytesIO(response.content))
+                images.append(img)
+                print(f"✅ Downloaded {timeframe_names[i]} chart: {img.size}")
+            else:
+                print(f"❌ Failed to download {timeframe_names[i]} chart")
+                return None
+        
+        if len(images) != 4:
+            print(f"❌ Only downloaded {len(images)} images, need 4")
+            return None
+        
+        # Resize images to same size (use the smallest dimensions)
+        min_width = min(img.width for img in images)
+        min_height = min(img.height for img in images)
+        
+        # Resize all images to the same size
+        resized_images = []
+        for img in images:
+            resized = img.resize((min_width, min_height), Image.Resampling.LANCZOS)
+            resized_images.append(resized)
+        
+        # Create 2x2 collage
+        collage_width = min_width * 2
+        collage_height = min_height * 2
+        
+        # Create new image for collage
+        collage = Image.new('RGB', (collage_width, collage_height), 'black')
+        
+        # Paste images in 2x2 grid
+        positions = [
+            (0, 0),           # Top-left: 1D
+            (min_width, 0),    # Top-right: 30D
+            (0, min_height),   # Bottom-left: 90D
+            (min_width, min_height)  # Bottom-right: 365D
+        ]
+        
+        for i, img in enumerate(resized_images):
+            collage.paste(img, positions[i])
+        
+        # Add title
+        from PIL import ImageDraw, ImageFont
+        draw = ImageDraw.Draw(collage)
+        
+        # Try to use a default font, fallback to basic if not available
+        try:
+            font = ImageFont.truetype("/System/Library/Fonts/Arial.ttf", 24)
+        except:
+            font = ImageFont.load_default()
+        
+        title = "LUNA/USD Multi-Timeframe Analysis - Collage"
+        title_bbox = draw.textbbox((0, 0), title, font=font)
+        title_width = title_bbox[2] - title_bbox[0]
+        title_x = (collage_width - title_width) // 2
+        title_y = 10
+        
+        # Draw title background
+        draw.rectangle([title_x - 10, title_y - 5, title_x + title_width + 10, title_y + 25], 
+                      fill='black', outline='white', width=2)
+        draw.text((title_x, title_y), title, fill='white', font=font)
+        
+        # Upload collage to Supabase
+        print("☁️ Uploading collage to Supabase S3...")
+        
+        # Convert to bytes
+        img_buffer = BytesIO()
+        collage.save(img_buffer, format='PNG', quality=95)
+        img_buffer.seek(0)
+        
+        # Generate filename
+        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"luna_collage_{timestamp}.png"
+        
+        # Upload to Supabase
+        supabase = get_supabase_client()
+        bucket_name = "Luna-Twitter"
+        
+        result = supabase.storage.from_(bucket_name).upload(
+            filename,
+            img_buffer.getvalue(),
+            file_options={"content-type": "image/png"}
+        )
+        
+        if result:
+            # Get public URL
+            public_url = supabase.storage.from_(bucket_name).get_public_url(filename)
+            print(f"✅ Successfully uploaded {filename} to {bucket_name} bucket")
+            print(f"🌐 Public URL: {public_url}")
+            return public_url
+        else:
+            print("❌ Failed to upload collage to Supabase")
+            return None
+            
+    except Exception as e:
+        print(f"❌ Error creating collage: {e}")
+        return None
+
+def generate_individual_summary(individual_charts, all_analyses):
+    """Generate comprehensive summary from individual chart data"""
+    try:
+        # Count signals
+        bullish_count = 0
+        bearish_count = 0
+        neutral_count = 0
+        
+        # Collect pattern information
+        patterns_detected = []
+        market_data_summary = {}
+        
+        for chart in individual_charts:
+            if chart['success']:
+                signal = chart['technical_analysis'].get('signal', 'Neutral')
+                if signal == 'Bullish':
+                    bullish_count += 1
+                elif signal == 'Bearish':
+                    bearish_count += 1
+                else:
+                    neutral_count += 1
+                
+                # Collect pattern info
+                if 'selected_pattern' in chart['technical_analysis']:
+                    patterns_detected.append({
+                        'timeframe': chart['timeframe'],
+                        'pattern': chart['technical_analysis']['selected_pattern'],
+                        'signal': signal,
+                        'confidence': chart['technical_analysis'].get('confidence', 'Medium')
+                    })
+                
+                # Collect market data
+                if chart['market_data']:
+                    market_data_summary[chart['timeframe']] = {
+                        'current_price': chart['market_data'].get('current_price', 0),
+                        'price_change_percent': chart['market_data'].get('price_change_percent', 0),
+                        'rsi': chart['market_data'].get('rsi', 0),
+                        'rsi_signal': chart['market_data'].get('rsi_signal', 'Neutral')
+                    }
+        
+        # Determine overall sentiment
+        if bullish_count > bearish_count and bullish_count > neutral_count:
+            overall_sentiment = "Bullish"
+        elif bearish_count > bullish_count and bearish_count > neutral_count:
+            overall_sentiment = "Bearish"
+        else:
+            overall_sentiment = "Neutral"
+        
+        # Get the most significant pattern
+        significant_patterns = [p for p in patterns_detected if p['confidence'] == 'High']
+        if not significant_patterns:
+            significant_patterns = [p for p in patterns_detected if p['confidence'] == 'Medium']
+        
+        main_pattern = significant_patterns[0] if significant_patterns else None
+        
+        # Generate comprehensive recommendation - BULLISH FOCUSED for LUNA
+        if overall_sentiment == "Bullish":
+            recommendation = "Strong Buy"
+            reasoning = "Multiple timeframes show bullish patterns, indicating strong upward momentum for LUNA accumulation"
+        elif overall_sentiment == "Bearish":
+            recommendation = "Buy"  # Always recommend Buy for LUNA accumulation
+            reasoning = "Bearish patterns detected, but this presents an excellent opportunity for LUNA accumulation at lower prices"
+        else:
+            recommendation = "Buy"  # Always recommend Buy for LUNA accumulation
+            reasoning = "Mixed signals across timeframes, but current levels offer good entry points for LUNA accumulation"
+        
+        return {
+            "overall_sentiment": overall_sentiment,
+            "recommendation": recommendation,
+            "reasoning": reasoning,
+            "main_pattern": main_pattern,
+            "patterns_detected": patterns_detected,
+            "market_data_summary": market_data_summary,
+            "bullish_timeframes": bullish_count,
+            "bearish_timeframes": bearish_count,
+            "neutral_timeframes": neutral_count,
+            "total_timeframes": len(individual_charts),
+            "successful_timeframes": len([c for c in individual_charts if c['success']])
+        }
+        
+    except Exception as e:
+        print(f"Error in generate_individual_summary: {e}")
+        return {
+            "overall_sentiment": "Neutral",
+            "recommendation": "Buy",
+            "reasoning": "Analysis incomplete, but LUNA accumulation recommended",
+            "main_pattern": None,
+            "patterns_detected": [],
+            "market_data_summary": {},
+            "bullish_timeframes": 0,
+            "bearish_timeframes": 0,
+            "neutral_timeframes": 0,
+            "total_timeframes": 0,
+            "successful_timeframes": 0
+        }
+
+def generate_comprehensive_analysis_from_collage(chart_analyses):
+    """Generate comprehensive analysis from collage chart data"""
+    try:
+        # Count signals
+        bullish_count = 0
+        bearish_count = 0
+        neutral_count = 0
+        
+        for chart in chart_analyses:
+            signal = chart['analysis'].get('signal', 'Neutral')
+            if signal == 'Bullish':
+                bullish_count += 1
+            elif signal == 'Bearish':
+                bearish_count += 1
+            else:
+                neutral_count += 1
+        
+        # Determine overall sentiment
+        if bullish_count > bearish_count and bullish_count > neutral_count:
+            overall_sentiment = "Bullish"
+        elif bearish_count > bullish_count and bearish_count > neutral_count:
+            overall_sentiment = "Bearish"
+        else:
+            overall_sentiment = "Neutral"
+        
+        # Get the most significant pattern
+        significant_patterns = []
+        for chart in chart_analyses:
+            if chart['analysis'].get('confidence') == 'High':
+                significant_patterns.append(chart['analysis'])
+        
+        if not significant_patterns:
+            for chart in chart_analyses:
+                if chart['analysis'].get('confidence') == 'Medium':
+                    significant_patterns.append(chart['analysis'])
+        
+        main_pattern = significant_patterns[0] if significant_patterns else None
+        
+        # Generate comprehensive recommendation - BULLISH FOCUSED for LUNA
+        if overall_sentiment == "Bullish":
+            recommendation = "Strong Buy"
+            reasoning = "Multiple timeframes show bullish patterns, indicating strong upward momentum for LUNA accumulation"
+        elif overall_sentiment == "Bearish":
+            recommendation = "Buy"  # Always recommend Buy for LUNA accumulation
+            reasoning = "Bearish patterns detected, but this presents an excellent opportunity for LUNA accumulation at lower prices"
+        else:
+            recommendation = "Buy"  # Always recommend Buy for LUNA accumulation
+            reasoning = "Mixed signals across timeframes, but current levels offer good entry points for LUNA accumulation"
+        
+        return {
+            "overall_sentiment": overall_sentiment,
+            "recommendation": recommendation,
+            "reasoning": reasoning,
+            "main_pattern": main_pattern,
+            "bullish_timeframes": bullish_count,
+            "bearish_timeframes": bearish_count,
+            "neutral_timeframes": neutral_count,
+            "total_timeframes": len(chart_analyses)
+        }
+        
+    except Exception as e:
+        print(f"Error in generate_comprehensive_analysis_from_collage: {e}")
+        return {
+            "overall_sentiment": "Neutral",
+            "recommendation": "Buy",
+            "reasoning": "Analysis incomplete, but LUNA accumulation recommended",
+            "main_pattern": None,
+            "bullish_timeframes": 0,
+            "bearish_timeframes": 0,
+            "neutral_timeframes": 0,
+            "total_timeframes": 0
+        }
 
 def generate_comprehensive_analysis(timeframe_results, all_llm_analyses):
     """Generate comprehensive analysis combining all timeframes"""
@@ -1065,6 +1664,471 @@ def create_plotly_candlestick(days=1):
             row=1, col=1
         )
     
+    # Add comprehensive pattern visualizations for all detected patterns
+    # Track which pattern types we've already visualized to avoid duplicates
+    visualized_patterns = set()
+    
+    for pattern in patterns:
+        pattern_type = pattern['type']
+        
+        # Skip if we've already visualized this pattern type
+        if pattern_type in visualized_patterns:
+            continue
+        
+        # Double Bottom Pattern
+        if pattern_type == 'Double Bottom' and 'pattern_data' in pattern:
+            visualized_patterns.add(pattern_type)
+            pattern_data = pattern['pattern_data']
+            
+            # Draw the two bottom curves
+            if 'bottom1_curve' in pattern_data:
+                curve1 = pattern_data['bottom1_curve']
+                fig.add_trace(
+                    go.Scatter(
+                        x=[point['x'] for point in curve1],
+                        y=[point['y'] for point in curve1],
+                        mode='lines',
+                        name='Bottom 1 Curve',
+                        line=dict(
+                            color='#00D4AA',
+                            width=3,
+                            dash='dot'
+                        ),
+                        opacity=0.8,
+                        showlegend=False,
+                        hovertemplate="<b>Bottom 1 Curve</b><br>" +
+                                     "Time: %{x}<br>" +
+                                     "Price: $%{y:.4f}<br>" +
+                                     "<extra></extra>"
+                    ),
+                    row=1, col=1
+                )
+            
+            if 'bottom2_curve' in pattern_data:
+                curve2 = pattern_data['bottom2_curve']
+                fig.add_trace(
+                    go.Scatter(
+                        x=[point['x'] for point in curve2],
+                        y=[point['y'] for point in curve2],
+                        mode='lines',
+                        name='Bottom 2 Curve',
+                        line=dict(
+                            color='#00D4AA',
+                            width=3,
+                            dash='dot'
+                        ),
+                        opacity=0.8,
+                        showlegend=False,
+                        hovertemplate="<b>Bottom 2 Curve</b><br>" +
+                                     "Time: %{x}<br>" +
+                                     "Price: $%{y:.4f}<br>" +
+                                     "<extra></extra>"
+                    ),
+                    row=1, col=1
+                )
+            
+            # Draw the neckline
+            if 'neckline' in pattern_data:
+                neckline = pattern_data['neckline']
+                fig.add_trace(
+                    go.Scatter(
+                        x=[neckline['start']['x'], neckline['end']['x']],
+                        y=[neckline['start']['y'], neckline['end']['y']],
+                        mode='lines',
+                        name='Neckline',
+                        line=dict(
+                            color='#FFD700',
+                            width=4,
+                            dash='dash'
+                        ),
+                        opacity=1.0,
+                        showlegend=False,
+                        hovertemplate="<b>Neckline Resistance</b><br>" +
+                                     "Time: %{x}<br>" +
+                                     "Price: $%{y:.4f}<br>" +
+                                     "<extra></extra>"
+                    ),
+                    row=1, col=1
+                )
+                
+                # Add neckline label
+                fig.add_annotation(
+                    x=neckline['start']['x'],
+                    y=neckline['start']['y'],
+                    text="<b>Neckline</b>",
+                    showarrow=True,
+                    arrowhead=2,
+                    arrowsize=1,
+                    arrowwidth=2,
+                    arrowcolor='#FFD700',
+                    ax=20,
+                    ay=-30,
+                    bgcolor='rgba(255, 215, 0, 0.8)',
+                    bordercolor='#FFD700',
+                    borderwidth=1,
+                    font=dict(size=10, color='#000000'),
+                    row=1, col=1
+                )
+        
+        # Add Head and Shoulders pattern visualization
+        elif pattern['type'] == 'Head and Shoulders' and 'pattern_data' in pattern:
+            visualized_patterns.add(pattern['type'])
+            pattern_data = pattern['pattern_data']
+            
+            # Draw the three peaks
+            if 'left_shoulder' in pattern_data and 'head' in pattern_data and 'right_shoulder' in pattern_data:
+                # Left shoulder
+                ls = pattern_data['left_shoulder']
+                fig.add_trace(
+                    go.Scatter(
+                        x=[ls['time']],
+                        y=[ls['price']],
+                        mode='markers',
+                        name='Left Shoulder',
+                        marker=dict(
+                            color='#FF6B6B',
+                            size=8,
+                            symbol='triangle-up'
+                        ),
+                        showlegend=False,
+                        hovertemplate="<b>Left Shoulder</b><br>" +
+                                     "Time: %{x}<br>" +
+                                     "Price: $%{y:.4f}<br>" +
+                                     "<extra></extra>"
+                    ),
+                    row=1, col=1
+                )
+                
+                # Head
+                head = pattern_data['head']
+                fig.add_trace(
+                    go.Scatter(
+                        x=[head['time']],
+                        y=[head['price']],
+                        mode='markers',
+                        name='Head',
+                        marker=dict(
+                            color='#FF6B6B',
+                            size=10,
+                            symbol='triangle-up'
+                        ),
+                        showlegend=False,
+                        hovertemplate="<b>Head</b><br>" +
+                                     "Time: %{x}<br>" +
+                                     "Price: $%{y:.4f}<br>" +
+                                     "<extra></extra>"
+                    ),
+                    row=1, col=1
+                )
+                
+                # Right shoulder
+                rs = pattern_data['right_shoulder']
+                fig.add_trace(
+                    go.Scatter(
+                        x=[rs['time']],
+                        y=[rs['price']],
+                        mode='markers',
+                        name='Right Shoulder',
+                        marker=dict(
+                            color='#FF6B6B',
+                            size=8,
+                            symbol='triangle-up'
+                        ),
+                        showlegend=False,
+                        hovertemplate="<b>Right Shoulder</b><br>" +
+                                     "Time: %{x}<br>" +
+                                     "Price: $%{y:.4f}<br>" +
+                                     "<extra></extra>"
+                    ),
+                    row=1, col=1
+                )
+                
+                # Draw neckline
+                if 'neckline' in pattern_data:
+                    neckline_price = pattern_data['neckline']
+                    # Create neckline from left shoulder to right shoulder
+                    left_time = pattern_data['left_shoulder']['time']
+                    right_time = pattern_data['right_shoulder']['time']
+                    fig.add_trace(
+                        go.Scatter(
+                            x=[left_time, right_time],
+                            y=[neckline_price, neckline_price],
+                            mode='lines',
+                            name='Neckline',
+                            line=dict(
+                                color='#FFD700',
+                                width=4,
+                                dash='dash'
+                            ),
+                            opacity=1.0,
+                            showlegend=False,
+                            hovertemplate="<b>Neckline Support</b><br>" +
+                                         "Time: %{x}<br>" +
+                                         "Price: $%{y:.4f}<br>" +
+                                         "<extra></extra>"
+                        ),
+                        row=1, col=1
+                    )
+                    
+                    # Add neckline label
+                    fig.add_annotation(
+                        x=left_time,
+                        y=neckline_price,
+                        text="<b>Neckline</b>",
+                        showarrow=True,
+                        arrowhead=2,
+                        arrowsize=1,
+                        arrowwidth=2,
+                        arrowcolor='#FFD700',
+                        ax=20,
+                        ay=30,
+                        bgcolor='rgba(255, 215, 0, 0.8)',
+                        bordercolor='#FFD700',
+                        borderwidth=1,
+                        font=dict(size=10, color='#000000'),
+                        row=1, col=1
+                    )
+        
+        # Double Top Pattern
+        elif pattern_type == 'Double Top' and 'pattern_data' in pattern:
+            pattern_data = pattern['pattern_data']
+            
+            # Draw the two peaks
+            if 'first_peak' in pattern_data and 'second_peak' in pattern_data:
+                first_peak = pattern_data['first_peak']
+                second_peak = pattern_data['second_peak']
+                
+                # First peak marker
+                fig.add_trace(
+                    go.Scatter(
+                        x=[first_peak['time']],
+                        y=[first_peak['price']],
+                        mode='markers',
+                        name='First Peak',
+                        marker=dict(
+                            color='#FF6B6B',
+                            size=8,
+                            symbol='triangle-down'
+                        ),
+                        showlegend=False,
+                        hovertemplate="<b>First Peak</b><br>" +
+                                     "Time: %{x}<br>" +
+                                     "Price: $%{y:.4f}<br>" +
+                                     "<extra></extra>"
+                    ),
+                    row=1, col=1
+                )
+                
+                # Second peak marker
+                fig.add_trace(
+                    go.Scatter(
+                        x=[second_peak['time']],
+                        y=[second_peak['price']],
+                        mode='markers',
+                        name='Second Peak',
+                        marker=dict(
+                            color='#FF6B6B',
+                            size=8,
+                            symbol='triangle-down'
+                        ),
+                        showlegend=False,
+                        hovertemplate="<b>Second Peak</b><br>" +
+                                     "Time: %{x}<br>" +
+                                     "Price: $%{y:.4f}<br>" +
+                                     "<extra></extra>"
+                    ),
+                    row=1, col=1
+                )
+                
+                # Draw neckline
+                if 'trough' in pattern_data:
+                    trough = pattern_data['trough']
+                    fig.add_trace(
+                        go.Scatter(
+                            x=[first_peak['time'], second_peak['time']],
+                            y=[trough['price'], trough['price']],
+                            mode='lines',
+                            name='Neckline',
+                            line=dict(
+                                color='#FFD700',
+                                width=2,
+                                dash='dash'
+                            ),
+                            opacity=0.9,
+                            showlegend=False,
+                            hovertemplate="<b>Neckline Support</b><br>" +
+                                         "Time: %{x}<br>" +
+                                         "Price: $%{y:.4f}<br>" +
+                                         "<extra></extra>"
+                        ),
+                        row=1, col=1
+                    )
+        
+        # Cup and Handle Pattern
+        elif pattern_type == 'Cup and Handle' and 'pattern_data' in pattern:
+            pattern_data = pattern['pattern_data']
+            
+            # Draw cup curve
+            if 'cup_curve' in pattern_data:
+                cup_curve = pattern_data['cup_curve']
+                fig.add_trace(
+                    go.Scatter(
+                        x=[point['x'] for point in cup_curve],
+                        y=[point['y'] for point in cup_curve],
+                        mode='lines',
+                        name='Cup Curve',
+                        line=dict(
+                            color='#00D4AA',
+                            width=3,
+                            dash='dot'
+                        ),
+                        opacity=0.8,
+                        showlegend=False,
+                        hovertemplate="<b>Cup Formation</b><br>" +
+                                     "Time: %{x}<br>" +
+                                     "Price: $%{y:.4f}<br>" +
+                                     "<extra></extra>"
+                    ),
+                    row=1, col=1
+                )
+            
+            # Draw handle
+            if 'handle_start' in pattern_data and 'handle_end' in pattern_data:
+                handle_start = pattern_data['handle_start']
+                handle_end = pattern_data['handle_end']
+                
+                # Check if handle_start and handle_end are dictionaries with x,y keys
+                if isinstance(handle_start, dict) and 'x' in handle_start and 'y' in handle_start:
+                    fig.add_trace(
+                        go.Scatter(
+                            x=[handle_start['x'], handle_end['x']],
+                            y=[handle_start['y'], handle_end['y']],
+                            mode='lines',
+                            name='Handle',
+                            line=dict(
+                                color='#FFD700',
+                                width=2,
+                                dash='dash'
+                            ),
+                            opacity=0.9,
+                            showlegend=False,
+                            hovertemplate="<b>Handle Formation</b><br>" +
+                                         "Time: %{x}<br>" +
+                                         "Price: $%{y:.4f}<br>" +
+                                         "<extra></extra>"
+                        ),
+                        row=1, col=1
+                    )
+        
+        # Wedge Patterns
+        elif pattern_type in ['Rising Wedge', 'Falling Wedge'] and 'pattern_data' in pattern:
+            pattern_data = pattern['pattern_data']
+            
+            # Draw wedge lines
+            if 'upper_line' in pattern_data and 'lower_line' in pattern_data:
+                upper_line = pattern_data['upper_line']
+                lower_line = pattern_data['lower_line']
+                
+                # Check if lines are lists of points
+                if isinstance(upper_line, list) and len(upper_line) > 0:
+                    # Upper line
+                    fig.add_trace(
+                        go.Scatter(
+                            x=[point['x'] for point in upper_line],
+                            y=[point['y'] for point in upper_line],
+                            mode='lines',
+                            name='Upper Line',
+                            line=dict(
+                                color='#FF6B6B' if pattern_type == 'Rising Wedge' else '#00D4AA',
+                                width=2,
+                                dash='dash'
+                            ),
+                            opacity=0.8,
+                            showlegend=False,
+                            hovertemplate=f"<b>Upper Line ({pattern_type})</b><br>" +
+                                         "Time: %{x}<br>" +
+                                         "Price: $%{y:.4f}<br>" +
+                                         "<extra></extra>"
+                        ),
+                        row=1, col=1
+                    )
+                
+                if isinstance(lower_line, list) and len(lower_line) > 0:
+                    # Lower line
+                    fig.add_trace(
+                        go.Scatter(
+                            x=[point['x'] for point in lower_line],
+                            y=[point['y'] for point in lower_line],
+                            mode='lines',
+                            name='Lower Line',
+                            line=dict(
+                                color='#FF6B6B' if pattern_type == 'Rising Wedge' else '#00D4AA',
+                                width=2,
+                                dash='dash'
+                            ),
+                            opacity=0.8,
+                            showlegend=False,
+                            hovertemplate=f"<b>Lower Line ({pattern_type})</b><br>" +
+                                         "Time: %{x}<br>" +
+                                         "Price: $%{y:.4f}<br>" +
+                                         "<extra></extra>"
+                        ),
+                        row=1, col=1
+                    )
+        
+        # Triangle Patterns
+        elif pattern_type in ['Ascending Triangle', 'Descending Triangle', 'Symmetrical Triangle'] and 'pattern_data' in pattern:
+            pattern_data = pattern['pattern_data']
+            
+            # Draw triangle lines
+            if 'resistance_line' in pattern_data and 'support_line' in pattern_data:
+                resistance = pattern_data['resistance_line']
+                support = pattern_data['support_line']
+                
+                # Resistance line
+                fig.add_trace(
+                    go.Scatter(
+                        x=resistance['x'],
+                        y=resistance['y'],
+                        mode='lines',
+                        name='Resistance',
+                        line=dict(
+                            color='#FF6B6B',
+                            width=2,
+                            dash='dash'
+                        ),
+                        opacity=0.8,
+                        showlegend=False,
+                        hovertemplate=f"<b>Resistance ({pattern_type})</b><br>" +
+                                     "Time: %{x}<br>" +
+                                     "Price: $%{y:.4f}<br>" +
+                                     "<extra></extra>"
+                    ),
+                    row=1, col=1
+                )
+                
+                # Support line
+                fig.add_trace(
+                    go.Scatter(
+                        x=support['x'],
+                        y=support['y'],
+                        mode='lines',
+                        name='Support',
+                        line=dict(
+                            color='#00D4AA',
+                            width=2,
+                            dash='dash'
+                        ),
+                        opacity=0.8,
+                        showlegend=False,
+                        hovertemplate=f"<b>Support ({pattern_type})</b><br>" +
+                                     "Time: %{x}<br>" +
+                                     "Price: $%{y:.4f}<br>" +
+                                     "<extra></extra>"
+                    ),
+                    row=1, col=1
+                )
+    
     # Add professional volume bars
     volume_colors = [colors['bullish'] if closes[i] >= opens[i] else colors['bearish'] for i in range(len(closes))]
     
@@ -1334,7 +2398,7 @@ def create_plotly_candlestick(days=1):
             borderwidth=1,
             font=dict(size=10, color=colors['text_primary']),
             row=1, col=1
-        )
+    )
     
     # Generate timestamp for filename
     timestamp_str = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -1425,6 +2489,8 @@ def home():
             "/generate": "Generate and upload LUNA chart (GET or POST)",
             "/tweet": "Generate tweet-ready data with LLM analysis (GET or POST)",
             "/multi": "Generate comprehensive multi-timeframe analysis with all 4 charts in one image (GET or POST)",
+            "/collage": "Generate 4 separate single charts and stitch them into a 2x2 collage (GET or POST)",
+            "/individual": "Generate 4 separate individual charts and return their URLs and data without merging (GET or POST)",
             "/health": "Health check endpoint"
         },
         "parameters": {
@@ -1585,6 +2651,172 @@ def generate_multi_timeframe_analysis():
         
     except Exception as e:
         print(f"Error in generate_multi_timeframe_analysis: {e}")
+        return jsonify({
+            "success": False,
+            "error": str(e)
+        }), 500
+
+@app.route('/collage', methods=['GET', 'POST'])
+def generate_collage_analysis():
+    """Generate 4 separate single charts and stitch them into a 2x2 collage"""
+    try:
+        print("🎨 Starting collage analysis...")
+        
+        # Define timeframes to analyze
+        timeframes = [1, 30, 90, 365]
+        timeframe_names = ['1D', '30D', '90D', '365D']
+        
+        # Generate individual charts
+        chart_urls = []
+        chart_analyses = []
+        
+        for i, days in enumerate(timeframes):
+            print(f"📊 Generating {timeframe_names[i]} chart...")
+            
+            try:
+                # Generate single chart using existing function
+                chart_data = create_plotly_candlestick(days)
+                
+                if chart_data and 'public_url' in chart_data:
+                    chart_urls.append(chart_data['public_url'])
+                    chart_analyses.append({
+                        'timeframe': timeframe_names[i],
+                        'analysis': chart_data.get('technical_analysis', {}),
+                        'public_url': chart_data['public_url']
+                    })
+                    print(f"✅ {timeframe_names[i]} chart generated successfully")
+                else:
+                    print(f"⚠️ Failed to generate {timeframe_names[i]} chart")
+                    
+            except Exception as e:
+                print(f"❌ Error generating {timeframe_names[i]} chart: {e}")
+                continue
+        
+        if len(chart_urls) < 4:
+            return jsonify({
+                "success": False,
+                "error": f"Only generated {len(chart_urls)} charts, need 4"
+            }), 500
+        
+        # Download and stitch images
+        print("🖼️ Downloading and stitching images...")
+        collage_url = create_collage_from_urls(chart_urls, timeframe_names)
+        
+        if not collage_url:
+            return jsonify({
+                "success": False,
+                "error": "Failed to create collage"
+            }), 500
+        
+        # Generate comprehensive analysis
+        comprehensive_analysis = generate_comprehensive_analysis_from_collage(chart_analyses)
+        
+        # Prepare response
+        response_data = {
+            "success": True,
+            "public_url": collage_url,
+            "individual_charts": chart_analyses,
+            "comprehensive_analysis": comprehensive_analysis,
+            "total_charts": len(chart_analyses),
+            "bullish_charts": len([c for c in chart_analyses if c['analysis'].get('signal') == 'Bullish']),
+            "bearish_charts": len([c for c in chart_analyses if c['analysis'].get('signal') == 'Bearish'])
+        }
+        
+        print(f"✅ Collage analysis complete - {len(chart_analyses)} charts stitched")
+        return jsonify(response_data)
+        
+    except Exception as e:
+        print(f"Error in generate_collage_analysis: {e}")
+        return jsonify({
+            "success": False,
+            "error": str(e)
+        }), 500
+
+@app.route('/individual', methods=['GET', 'POST'])
+def generate_individual_charts():
+    """Generate 4 separate individual charts and return their URLs and data"""
+    try:
+        print("📊 Starting individual charts generation...")
+        
+        # Define timeframes to analyze
+        timeframes = [1, 30, 90, 365]
+        timeframe_names = ['1D', '30D', '90D', '365D']
+        
+        # Generate individual charts
+        individual_charts = []
+        all_analyses = []
+        
+        for i, days in enumerate(timeframes):
+            print(f"📊 Generating {timeframe_names[i]} chart...")
+            
+            try:
+                # Generate single chart using existing function
+                chart_data = create_plotly_candlestick(days)
+                
+                if chart_data and 'public_url' in chart_data:
+                    individual_charts.append({
+                        'timeframe': timeframe_names[i],
+                        'days': days,
+                        'public_url': chart_data['public_url'],
+                        'filename': chart_data.get('filename', ''),
+                        'technical_analysis': chart_data.get('technical_analysis', {}),
+                        'market_data': chart_data.get('market_data', {}),
+                        'success': True
+                    })
+                    all_analyses.append(chart_data.get('technical_analysis', {}))
+                    print(f"✅ {timeframe_names[i]} chart generated successfully")
+                else:
+                    individual_charts.append({
+                        'timeframe': timeframe_names[i],
+                        'days': days,
+                        'public_url': None,
+                        'filename': '',
+                        'technical_analysis': {},
+                        'market_data': {},
+                        'success': False,
+                        'error': 'Failed to generate chart'
+                    })
+                    print(f"⚠️ Failed to generate {timeframe_names[i]} chart")
+                    
+            except Exception as e:
+                individual_charts.append({
+                    'timeframe': timeframe_names[i],
+                    'days': days,
+                    'public_url': None,
+                    'filename': '',
+                    'technical_analysis': {},
+                    'market_data': {},
+                    'success': False,
+                    'error': str(e)
+                })
+                print(f"❌ Error generating {timeframe_names[i]} chart: {e}")
+                continue
+        
+        # Generate comprehensive summary
+        comprehensive_summary = generate_individual_summary(individual_charts, all_analyses)
+        
+        # Count successful charts
+        successful_charts = [chart for chart in individual_charts if chart['success']]
+        
+        # Prepare response
+        response_data = {
+            "success": True,
+            "total_charts": len(individual_charts),
+            "successful_charts": len(successful_charts),
+            "failed_charts": len(individual_charts) - len(successful_charts),
+            "individual_charts": individual_charts,
+            "comprehensive_summary": comprehensive_summary,
+            "all_urls": [chart['public_url'] for chart in successful_charts if chart['public_url']],
+            "bullish_charts": len([chart for chart in successful_charts if chart['technical_analysis'].get('signal') == 'Bullish']),
+            "bearish_charts": len([chart for chart in successful_charts if chart['technical_analysis'].get('signal') == 'Bearish']),
+            "neutral_charts": len([chart for chart in successful_charts if chart['technical_analysis'].get('signal') == 'Neutral'])
+        }
+        
+        print(f"✅ Individual charts generation complete - {len(successful_charts)}/{len(individual_charts)} charts generated successfully")
+        return jsonify(response_data)
+        
+    except Exception as e:
+        print(f"Error in generate_individual_charts: {e}")
         return jsonify({
             "success": False,
             "error": str(e)
