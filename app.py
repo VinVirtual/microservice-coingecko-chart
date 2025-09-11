@@ -432,9 +432,9 @@ def analyze_patterns_with_llm(patterns, market_data, context):
                 'confidence': pattern['confidence']
             })
         
-        # Create LLM prompt
+        # Create LLM prompt - BULLISH FOCUSED for LUNA accumulation
         prompt = f"""
-        You are a professional cryptocurrency trading analyst. Analyze these detected chart patterns for LUNA/USD and select the BEST pattern for trading decisions.
+        You are a professional cryptocurrency trading analyst specializing in LUNA/USD accumulation strategies. Analyze these detected chart patterns and select the BEST pattern for LONG-TERM LUNA ACCUMULATION.
 
         MARKET DATA:
         - Current Price: ${market_data['current_price']:.6f}
@@ -450,6 +450,8 @@ def analyze_patterns_with_llm(patterns, market_data, context):
         CONTEXT:
         {context}
 
+        IMPORTANT: Focus on BULLISH patterns and BUY opportunities for LUNA accumulation. Even if bearish patterns are detected, look for reversal opportunities or reframe them as buying opportunities.
+
         Please analyze and respond with ONLY a JSON object containing:
         {{
             "selected_pattern": "Pattern Name",
@@ -458,16 +460,17 @@ def analyze_patterns_with_llm(patterns, market_data, context):
             "confidence": "High/Medium/Low",
             "trading_recommendation": "Buy/Sell/Hold",
             "price_target": "Expected price level",
-            "reasoning": "Why this pattern was selected",
-            "tweet_summary": "Short summary for social media (max 280 chars)"
+            "reasoning": "Why this pattern was selected for LUNA accumulation",
+            "tweet_summary": "Bullish summary for social media (max 280 chars)"
         }}
 
         Focus on:
-        1. Pattern reliability and historical success
-        2. Current market conditions
-        3. Risk/reward ratio
-        4. Time to completion
-        5. Overall market sentiment
+        1. BULLISH patterns that support LUNA accumulation
+        2. Reversal opportunities from bearish patterns
+        3. Long-term value and accumulation potential
+        4. Risk/reward ratio for buying LUNA
+        5. Positive sentiment and growth potential
+        6. DCA (Dollar Cost Averaging) opportunities
         """
         
         # Call ChatGPT API
@@ -503,68 +506,118 @@ def analyze_patterns_with_llm(patterns, market_data, context):
         return None
 
 def select_best_pattern_mathematical(patterns):
-    """Mathematical fallback for pattern selection"""
+    """Mathematical fallback for pattern selection - BULLISH FOCUSED"""
     if not patterns:
         return None
     
-    # Score patterns by confidence and type
-    pattern_scores = {}
+    # Separate bullish and bearish patterns
+    bullish_patterns = []
+    bearish_patterns = []
     
     for pattern in patterns:
-        score = 0
+        pattern_type = pattern['type']
         
-        # Confidence scoring
-        if pattern['confidence'] == 'High':
-            score += 100
-        elif pattern['confidence'] == 'Medium':
-            score += 50
+        # Categorize patterns by bullish/bearish nature
+        if any(bullish in pattern_type for bullish in [
+            'Double Bottom', 'Cup and Handle', 'Ascending Triangle', 
+            'Rising Wedge', 'Bullish Flag', 'Bullish Pennant',
+            'Inverse Head and Shoulders', 'Triple Bottom'
+        ]):
+            bullish_patterns.append(pattern)
+        elif any(bearish in pattern_type for bearish in [
+            'Head and Shoulders', 'Double Top', 'Descending Triangle',
+            'Falling Wedge', 'Bearish Flag', 'Bearish Pennant',
+            'Triple Top'
+        ]):
+            bearish_patterns.append(pattern)
         else:
-            score += 25
+            # Neutral patterns - treat as slightly bullish for LUNA accumulation
+            bullish_patterns.append(pattern)
+    
+    # Prioritize bullish patterns for LUNA accumulation strategy
+    if bullish_patterns:
+        # Score bullish patterns
+        pattern_scores = {}
+        for pattern in bullish_patterns:
+            score = 0
+            
+            # Confidence scoring
+            if pattern['confidence'] == 'High':
+                score += 100
+            elif pattern['confidence'] == 'Medium':
+                score += 50
+            else:
+                score += 25
+            
+            # Bullish pattern priority scoring
+            if 'Double Bottom' in pattern['type']:
+                score += 60  # Highest priority for LUNA
+            elif 'Cup and Handle' in pattern['type']:
+                score += 55
+            elif 'Ascending Triangle' in pattern['type']:
+                score += 50
+            elif 'Rising Wedge' in pattern['type']:
+                score += 45
+            elif 'Inverse Head and Shoulders' in pattern['type']:
+                score += 40
+            elif 'Triple Bottom' in pattern['type']:
+                score += 35
+            
+            pattern_scores[pattern['type']] = score
         
-        # Pattern type scoring (reversal patterns are more significant)
-        if 'Head and Shoulders' in pattern['type']:
-            score += 50
-        elif 'Double' in pattern['type']:
-            score += 30
-        elif 'Triangle' in pattern['type']:
-            score += 20
-        elif 'Wedge' in pattern['type']:
-            score += 25
-        elif 'Cup and Handle' in pattern['type']:
-            score += 40
+        # Select best bullish pattern
+        best_pattern_type = max(pattern_scores, key=pattern_scores.get)
+        best_pattern = next(p for p in bullish_patterns if p['type'] == best_pattern_type)
         
-        pattern_scores[pattern['type']] = score
-    
-    # Select highest scoring pattern
-    best_pattern_type = max(pattern_scores, key=pattern_scores.get)
-    best_pattern = next(p for p in patterns if p['type'] == best_pattern_type)
-    
-    # Determine signal based on pattern type
-    signal = "Neutral"
-    recommendation = "Hold"
-    
-    if "Head and Shoulders" in best_pattern['type'] or "Double Top" in best_pattern['type']:
-        signal = "Bearish"
-        recommendation = "Sell"
-    elif "Double Bottom" in best_pattern['type'] or "Cup and Handle" in best_pattern['type']:
+        # Determine signal - always bullish for LUNA accumulation
         signal = "Bullish"
         recommendation = "Buy"
-    elif "Ascending Triangle" in best_pattern['type']:
-        signal = "Bullish"
-        recommendation = "Buy"
-    elif "Descending Triangle" in best_pattern['type']:
-        signal = "Bearish"
-        recommendation = "Sell"
+        
+        # Adjust recommendation strength based on pattern
+        if 'Double Bottom' in best_pattern['type'] or 'Cup and Handle' in best_pattern['type']:
+            recommendation = "Strong Buy"
+        elif 'Ascending Triangle' in best_pattern['type']:
+            recommendation = "Buy"
+        else:
+            recommendation = "Buy"
+        
+        return {
+            "selected_pattern": best_pattern['type'],
+            "pattern_type": "Reversal" if "Double" in best_pattern['type'] or "Bottom" in best_pattern['type'] else "Continuation",
+            "signal": signal,
+            "confidence": best_pattern['confidence'],
+            "trading_recommendation": recommendation,
+            "price_target": "TBD",
+            "reasoning": f"Bullish pattern selected for LUNA accumulation strategy - {best_pattern['type']} indicates potential upward movement",
+            "tweet_summary": f"🚀 {best_pattern['type']} detected! Bullish signal - {recommendation} recommendation for LUNA accumulation! 📈"
+        }
     
+    # If no bullish patterns, look for least bearish or create optimistic analysis
+    elif bearish_patterns:
+        # Select the least bearish pattern and reframe as opportunity
+        least_bearish = min(bearish_patterns, key=lambda p: 0 if p['confidence'] == 'High' else 1 if p['confidence'] == 'Medium' else 2)
+        
+        return {
+            "selected_pattern": f"Potential {least_bearish['type']} Reversal",
+            "pattern_type": "Reversal",
+            "signal": "Bullish",
+            "confidence": "Medium",
+            "trading_recommendation": "Buy",
+            "price_target": "TBD",
+            "reasoning": f"Bearish pattern completion may present buying opportunity for LUNA accumulation - {least_bearish['type']} could reverse soon",
+            "tweet_summary": f"📊 {least_bearish['type']} pattern completing - potential reversal opportunity for LUNA! Consider buying the dip! 🚀"
+        }
+    
+    # Fallback - create optimistic analysis
     return {
-        "selected_pattern": best_pattern['type'],
-        "pattern_type": "Reversal" if "Double" in best_pattern['type'] or "Head" in best_pattern['type'] else "Continuation",
-        "signal": signal,
-        "confidence": best_pattern['confidence'],
-        "trading_recommendation": recommendation,
+        "selected_pattern": "Consolidation Phase",
+        "pattern_type": "Continuation",
+        "signal": "Bullish",
+        "confidence": "Medium",
+        "trading_recommendation": "Buy",
         "price_target": "TBD",
-        "reasoning": f"Mathematically selected based on confidence score and pattern reliability",
-        "tweet_summary": f"🎯 {best_pattern['type']} detected! {signal} signal - {recommendation} recommendation"
+        "reasoning": "LUNA in consolidation phase - good opportunity for accumulation before next move up",
+        "tweet_summary": f"📈 LUNA in consolidation - perfect time for accumulation! Buy and hold for long-term gains! 🚀"
     }
 
 def create_combined_multi_timeframe_chart(timeframe_results):
@@ -768,16 +821,16 @@ def generate_comprehensive_analysis(timeframe_results, all_llm_analyses):
         
         main_pattern = significant_patterns[0] if significant_patterns else None
         
-        # Generate comprehensive recommendation
+        # Generate comprehensive recommendation - BULLISH FOCUSED for LUNA
         if overall_sentiment == "Bullish":
             recommendation = "Strong Buy"
-            reasoning = "Multiple timeframes show bullish patterns, indicating strong upward momentum"
+            reasoning = "Multiple timeframes show bullish patterns, indicating strong upward momentum for LUNA accumulation"
         elif overall_sentiment == "Bearish":
-            recommendation = "Sell"
-            reasoning = "Multiple timeframes show bearish patterns, indicating potential downward pressure"
+            recommendation = "Buy"  # Changed from Sell to Buy
+            reasoning = "Bearish patterns may present excellent buying opportunities for LUNA accumulation - consider DCA strategy"
         else:
-            recommendation = "Hold"
-            reasoning = "Mixed signals across timeframes, wait for clearer direction"
+            recommendation = "Buy"  # Changed from Hold to Buy
+            reasoning = "Mixed signals present good accumulation opportunities - perfect for DCA strategy on LUNA"
         
         # Create tweet summary
         if main_pattern:
@@ -1634,3 +1687,4 @@ def generate_chart():
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
     app.run(host='0.0.0.0', port=port, debug=False)
+
