@@ -815,7 +815,7 @@ def create_combined_multi_timeframe_chart(timeframe_results):
                 fig.add_annotation(
                     x=timestamps[len(timestamps)//2],
                     y=max(highs) * 0.95,
-                    text=f"<b>🎯 {analysis['selected_pattern']}</b><br><span style='font-size:10px'>{analysis['signal']} - {analysis['trading_recommendation']}</span>",
+                    text=f"<b>{analysis['selected_pattern']}</b><br><span style='font-size:10px'>{analysis['signal']} - {analysis['trading_recommendation']}</span>",
                     showarrow=False,
                     bgcolor=colors['surface'],
                     bordercolor=signal_color,
@@ -1437,9 +1437,9 @@ def generate_comprehensive_analysis(timeframe_results, all_llm_analyses):
         
         # Create tweet summary
         if main_pattern:
-            tweet_summary = f"🎯 {main_pattern['selected_pattern']} detected across multiple timeframes! {overall_sentiment} sentiment - {recommendation} recommendation for LUNA/USD"
+            tweet_summary = f" {main_pattern['selected_pattern']} detected across multiple timeframes! {overall_sentiment} sentiment - {recommendation} recommendation for LUNA/USD"
         else:
-            tweet_summary = f"📊 Multi-timeframe analysis shows {overall_sentiment} sentiment for LUNA/USD - {recommendation} recommendation"
+            tweet_summary = f" Multi-timeframe analysis shows {overall_sentiment} sentiment for LUNA/USD - {recommendation} recommendation"
         
         return {
             "overall_sentiment": overall_sentiment,
@@ -2409,7 +2409,7 @@ def create_plotly_candlestick(days=1):
         fig.add_annotation(
             x=timestamps[len(timestamps)//2],
             y=max(highs) * 0.98,
-            text=f"<b>🎯 {pattern_type}</b><br><span style='font-size:10px'>{pattern_signal} Signal - {pattern_recommendation}</span>",
+            text=f"<b> {pattern_type}</b><br><span style='font-size:10px'>{pattern_signal} Signal - {pattern_recommendation}</span>",
             showarrow=True,
             arrowhead=2,
             arrowsize=1,
