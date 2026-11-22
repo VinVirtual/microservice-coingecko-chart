@@ -1,323 +1,174 @@
-# LUNA Chart Generator - Professional Trading Analysis Tool
+# CoinGecko chart service
 
-A world-class Flask web service that generates professional-grade LUNA candlestick charts with advanced technical analysis, LLM-powered pattern recognition, and multi-timeframe analysis capabilities.
+[![test](https://github.com/VinVirtual/microservice-coingecko-chart/actions/workflows/test.yml/badge.svg)](https://github.com/VinVirtual/microservice-coingecko-chart/actions/workflows/test.yml)
+![python](https://img.shields.io/badge/python-3.11%E2%80%933.13-3776ab)
+![docker](https://img.shields.io/badge/docker-non--root-2496ed)
+[![license](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
-## 🚀 Features
+A small Flask service that renders candlestick charts as PNG or SVG from [CoinGecko](https://www.coingecko.com/en/api) market data. Ask for a coin, a range, a theme, a size and optional indicators; get an image back. Upstream calls are cached, retried and guarded by a circuit breaker, so the service stays inside CoinGecko's free-tier limits and keeps answering when the API has a bad minute.
 
-### 📊 **Professional Chart Generation**
-- High-resolution candlestick charts using Plotly
-- Auto-uploads to Supabase S3 bucket
-- Multiple timeframes (1d, 7d, 14d, 30d, 90d, 180d, 365d, max)
-- Professional dark theme with custom color schemes
+![Dark theme with SMA 20, EMA 50 and 24h volume](docs/media/chart-dark.png)
 
-### 🧠 **Advanced Technical Analysis**
-- **Trend Lines**: Automatic support/resistance detection
-- **Moving Averages**: MA20, MA50 with trend analysis
-- **RSI Indicator**: Momentum analysis with overbought/oversold zones
-- **Volume Analysis**: Trading volume patterns and spikes
-- **Pattern Recognition**: 15+ chart patterns including:
-  - Head and Shoulders (Bullish/Bearish)
-  - Double Top/Bottom
-  - Cup and Handle
-  - Rising/Falling Wedges
-  - Ascending/Descending Triangles
-
-### 🤖 **LLM-Powered Intelligence**
-- **ChatGPT Integration**: Intelligent pattern selection and analysis
-- **Mathematical Fallback**: Robust analysis when LLM unavailable
-- **Smart Recommendations**: Buy/Sell/Hold signals with confidence levels
-- **Tweet-Ready Output**: Social media optimized summaries
-
-### 📈 **Multi-Timeframe Analysis**
-- **Comprehensive View**: All 4 timeframes in one professional chart
-- **Signal Aggregation**: Combined analysis across timeframes
-- **Professional Layout**: 2x2 grid with consistent styling
-- **Complete Analysis**: Individual and comprehensive recommendations
-
-### 🎨 **Professional Styling**
-- Premium dark theme (#0F0F23 background, #1A1A2E surface)
-- High-resolution output (1920x1080, 3x scale)
-- Professional annotations and price markers
-- RSI zones with gradient fills
-- Enhanced typography and spacing
-- Interactive hover tooltips
-
-## 🌐 API Endpoints
-
-### `GET /`
-Returns API documentation and available endpoints.
-
-### `GET /health`
-Health check endpoint.
-
-### `GET /generate?days=1`
-Generate and upload a professional LUNA chart with advanced technical analysis.
-
-**Parameters:**
-- `days` (optional): Number of days for chart data. Valid values: 1, 7, 14, 30, 90, 180, 365, max. Default: 1
-
-### `GET /tweet?days=1`
-Generate tweet-ready data with LLM analysis for social media.
-
-**Parameters:**
-- `days` (optional): Number of days for analysis. Valid values: 1, 7, 14, 30, 90, 180, 365, max. Default: 1
-
-### `GET /multi`
-Generate comprehensive multi-timeframe analysis with all 4 charts in one professional image.
-
-**Features:**
-- Analyzes 1D, 30D, 90D, and 365D timeframes simultaneously
-- Creates combined chart with 2x2 grid layout
-- Provides comprehensive analysis across all timeframes
-- Generates overall sentiment and recommendations
-
-**Response Examples:**
-
-#### `/generate` Response:
-```json
-{
-  "success": true,
-  "public_url": "https://your-project.supabase.co/storage/v1/object/public/Luna-Twitter/luna_chart_1d_20250109_143022.png",
-  "chart_data": {
-    "current_price": 0.013882,
-    "price_change_percent": -2.24,
-    "data_points": 48,
-    "time_range": "2025-01-09 00:00 to 2025-01-09 23:59"
-  },
-  "technical_analysis": {
-    "rsi": {
-      "current": 54.6,
-      "signal": "Neutral"
-    },
-    "moving_averages": {
-      "ma20": 0.0132,
-      "ma50": 0.0131,
-      "trend": "Bullish"
-    },
-    "trend_lines": {
-      "count": 2,
-      "types": ["support", "resistance"]
-    },
-    "patterns": [
-      {
-        "type": "Head and Shoulders",
-        "description": "Classic bearish reversal pattern",
-        "confidence": "High"
-      }
-    ],
-    "llm_analysis": {
-      "selected_pattern": "Head and Shoulders",
-      "signal": "Bearish",
-      "recommendation": "Sell",
-      "confidence": "High",
-      "tweet_summary": "Bearish signal detected on LUNA/USD with a high confidence Head and Shoulders pattern."
-    }
-  }
-}
+```
+GET /v1/chart?coin=ethereum&days=30&indicators=sma:20,ema:50&volume=true
 ```
 
-#### `/tweet` Response:
-```json
-{
-  "success": true,
-  "public_url": "https://your-project.supabase.co/storage/v1/object/public/Luna-Twitter/luna_chart_1d_20250109_143022.png",
-  "pattern": "Head and Shoulders",
-  "signal": "Bearish",
-  "recommendation": "Sell",
-  "confidence": "High",
-  "current_price": "$0.013882",
-  "price_change": "-2.24%",
-  "tweet_summary": "Bearish signal detected on LUNA/USD with a high confidence Head and Shoulders pattern. Consider selling for potential downside.",
-  "rsi": 54.6,
-  "rsi_signal": "Neutral",
-  "total_patterns": 72
-}
-```
+<sub>README images are rendered from synthetic prices by `scripts/render_examples.py`, so they never go stale and need no network.</sub>
 
-#### `/multi` Response:
-```json
-{
-  "success": true,
-  "public_url": "https://your-project.supabase.co/storage/v1/object/public/Luna-Twitter/luna_multi_timeframe_20250109_143022.png",
-  "timeframes_analyzed": ["1D", "30D", "90D", "365D"],
-  "comprehensive_analysis": {
-    "overall_sentiment": "Neutral",
-    "overall_recommendation": "Hold",
-    "reasoning": "Mixed signals across timeframes, wait for clearer direction",
-    "tweet_summary": "Multi-timeframe analysis shows Neutral sentiment for LUNA/USD - Hold recommendation",
-    "signal_distribution": {
-      "bullish": 2,
-      "bearish": 2,
-      "neutral": 0,
-      "total": 4
-    },
-    "main_pattern": "Head and Shoulders",
-    "main_pattern_confidence": "High"
-  },
-  "individual_timeframes": {
-    "1D": {
-      "pattern": "Head and Shoulders",
-      "signal": "Bearish",
-      "recommendation": "Sell",
-      "confidence": "High",
-      "price_change": "-2.92%",
-      "rsi": 52.3,
-      "total_patterns": 73
-    },
-    "90D": {
-      "pattern": "Double Bottom",
-      "signal": "Bullish",
-      "recommendation": "Buy",
-      "confidence": "Medium",
-      "price_change": "-27.35%",
-      "rsi": 43.0,
-      "total_patterns": 5
-    }
-  },
-  "total_patterns_detected": 266,
-  "bullish_timeframes": 2,
-  "bearish_timeframes": 2
-}
-```
+![Light theme with EMA 20 and RSI 14](docs/media/chart-light.png)
 
-### `POST /generate`, `POST /tweet`, `POST /multi`
-Same as GET but accepts JSON payload:
-```json
-{
-  "days": 7
-}
-```
-
-## 🔧 Environment Variables
-
-Set these in your Railway deployment:
-
-### Required:
-- `SUPABASE_URL`: Your Supabase project URL
-- `SUPABASE_SERVICE_ROLE_KEY`: Your Supabase service role key
-- `SUPABASE_BUCKET_NAME`: Your Supabase storage bucket name (default: "Luna-Twitter")
-
-### Optional (for LLM features):
-- `OPENAI_API_KEY`: Your OpenAI API key for ChatGPT integration (optional - uses mathematical fallback if not provided)
-
-## 🚀 Deployment to Railway
-
-1. Push this folder to GitHub
-2. Connect your GitHub repo to Railway
-3. Set the environment variables in Railway dashboard
-4. Deploy!
-
-**Note**: The service uses Python 3.11 and numpy 1.26.4 for optimal compatibility.
-
-## 💡 Usage Examples
-
-### Basic Chart Generation:
-```bash
-# Generate 1-day chart with full technical analysis
-curl https://your-railway-app.railway.app/generate
-
-# Generate 7-day chart
-curl https://your-railway-app.railway.app/generate?days=7
-
-# Generate 90-day chart (long-term analysis)
-curl https://your-railway-app.railway.app/generate?days=90
-```
-
-### Tweet-Ready Data:
-```bash
-# Get tweet-ready analysis for 1-day
-curl https://your-railway-app.railway.app/tweet
-
-# Get tweet-ready analysis for 90-day (bullish patterns)
-curl https://your-railway-app.railway.app/tweet?days=90
-```
-
-### Multi-Timeframe Analysis:
-```bash
-# Get comprehensive multi-timeframe analysis
-curl https://your-railway-app.railway.app/multi
-```
-
-### Health Check:
-```bash
-# Check service status
-curl https://your-railway-app.railway.app/health
-```
-
-### JSON Payload Examples:
-```bash
-# POST request with JSON
-curl -X POST https://your-railway-app.railway.app/tweet \
-  -H "Content-Type: application/json" \
-  -d '{"days": 90}'
-
-# Multi-timeframe analysis
-curl -X POST https://your-railway-app.railway.app/multi \
-  -H "Content-Type: application/json" \
-  -d '{}'
-```
-
-## 🛠️ Local Development
+## Quick start
 
 ```bash
-# Clone and navigate to project
-git clone <your-repo>
-cd railway-deploy
+docker build -t coingecko-chart .
+docker run --rm -p 8000:8000 coingecko-chart
+curl -o btc.png "http://localhost:8000/v1/chart?coin=bitcoin&days=7"
+```
 
-# Create virtual environment
-python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
+Without Docker (Python 3.11+):
 
-# Install dependencies
+```bash
+python -m venv .venv && . .venv/bin/activate
 pip install -r requirements.txt
-
-# Set environment variables
-cp env.example .env
-# Edit .env with your Supabase credentials and optional OpenAI API key
-
-# Run locally
-python app.py
+gunicorn -c gunicorn.conf.py chartsvc.wsgi:app        # or: python -m chartsvc  (dev server)
 ```
 
-The service will be available at `http://localhost:5000`
+No API key is needed: without one the service uses CoinGecko's keyless public API. A free Demo key raises the limits; set `COINGECKO_API_KEY` (see [Configuration](#configuration)).
 
-### Local Testing:
+## API
+
+The full contract is served as OpenAPI 3.1 at `GET /openapi.json`.
+
+| Endpoint | Returns |
+|---|---|
+| `GET /v1/chart` | `image/png` or `image/svg+xml` |
+| `GET /v1/ohlc` | the candles behind a chart, as JSON |
+| `GET /health` | status, upstream circuit state, cache counters |
+| `GET /openapi.json` | this API's description |
+
+### `/v1/chart` parameters
+
+| Parameter | Values | Default |
+|---|---|---|
+| `coin` | CoinGecko coin id (`bitcoin`, `ethereum`, ...) | `DEFAULT_COIN` (`bitcoin`) |
+| `vs` | quote currency (`usd`, `eur`, `btc`, ...) | `usd` |
+| `days` | `1`, `7`, `14`, `30`, `90`, `180`, `365` | `30` |
+| `format` | `png`, `svg` | `png` |
+| `theme` | `dark`, `light` | `dark` |
+| `width` / `height` | 320-1600 / 240-1200 CSS px | 1200 / 675 |
+| `scale` | `1`, `2` (retina) | `1` |
+| `indicators` | up to 4 of `sma:N`, `ema:N` (overlays) and one `rsi:N` (panel), N = 2-200 | none |
+| `volume` | `true` adds CoinGecko's rolling 24h volume panel (one extra upstream call) | `false` |
+
+Candle size is decided by CoinGecko: 30 minutes for 1 day, 4 hours up to 30 days, 4 days beyond. An indicator that needs more candles than the range has is listed in the legend as such rather than silently missing.
+
+`/v1/ohlc` takes `coin`, `vs` and `days` and returns `[timestamp_ms, open, high, low, close]` rows (timestamp = candle close) plus a summary.
+
+### Responses
+
+Images carry `X-Cache: HIT | MISS | STALE` and `X-Request-ID`. Every JSON body, including every error, uses one envelope:
+
+```json
+{
+  "success": false,
+  "data": null,
+  "error": {
+    "code": "invalid_parameter",
+    "message": "'days' must be one of the values CoinGecko supports.",
+    "details": {"param": "days", "allowed": [1, 7, 14, 30, 90, 180, 365]}
+  },
+  "meta": {"request_id": "4f0c9b2e..."}
+}
+```
+
+| Status | `code` | When |
+|---|---|---|
+| 400 | `invalid_parameter` | unknown, repeated or out-of-range parameter (nothing is sent upstream) |
+| 404 | `coin_not_found`, `no_data`, `not_found` | unknown coin, empty range, unknown path |
+| 405 | `method_not_allowed` | |
+| 410 | `endpoint_removed` | a 1.x endpoint (see [Changes in 2.0](#changes-in-20)) |
+| 429 | `rate_limited` | per-client limit hit; `Retry-After` and `X-RateLimit-*` headers set |
+| 502 | `upstream_auth` | CoinGecko rejected the configured key |
+| 503 | `upstream_unavailable` | CoinGecko down or rate limiting us and nothing cached; `Retry-After` set |
+| 500 | `internal_error` | a bug; details are logged, never returned |
+
+## How it treats CoinGecko
+
+- **Cache.** Market data is cached per `(coin, vs, days)` for `CACHE_TTL_SECONDS` (default 300 s) and rendered images for the same time, so repeated requests cost no upstream calls. Concurrent misses for the same key make a single request.
+- **Timeouts and retries.** 3.05 s connect / 10 s read; connection errors, timeouts, 429 and 5xx are retried with exponential backoff (honouring `Retry-After`, capped at 5 s). 400/404 are not retried.
+- **Circuit breaker.** After `BREAKER_FAILURES` consecutive failures, calls stop for `BREAKER_RESET_SECONDS`, then one trial request decides whether to close it again.
+- **Stale on error.** If CoinGecko fails and an expired entry younger than `STALE_TTL_SECONDS` exists, it is served with `X-Cache: STALE` instead of an error.
+- **Payload checks.** Responses over 8 MB, malformed rows, non-finite numbers or impossible candles (high below open, ...) are rejected.
+- **Attribution.** Charts carry "Data: CoinGecko", as CoinGecko's free plans require.
+
+## Security
+
+- **No SSRF.** The host is fixed (`api.coingecko.com` or `pro-api.coingecko.com`); `coin` must match `^[a-z0-9][a-z0-9-]{0,79}$` and `vs` `^[a-z]{2,10}$` before they are used in a path; redirects are not followed. `ALLOWED_COINS` can restrict coins further.
+- **Bounded work.** Image size is capped at 1600×1200 CSS px × scale 2; at most 4 indicators; rate limits per client (`RATE_LIMIT_CHART`, `RATE_LIMIT_DATA`); Kaleido calls are serialised per worker; workers are recycled every `GUNICORN_MAX_REQUESTS`.
+- **No file writes.** Images live in a size-bounded in-memory LRU (`IMAGE_CACHE_MAX_MB`).
+- **Headers.** `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy: no-referrer`; SVG responses get `Content-Security-Policy: default-src 'none'`. CORS is off unless `CORS_ORIGINS` lists origins.
+- **Errors** never echo exceptions or upstream bodies. **Secrets** come only from the environment. The container runs as UID 10001.
+
+## Configuration
+
+All settings are environment variables, validated at startup. See [`.env.example`](.env.example).
+
+| Variable | Default | |
+|---|---|---|
+| `COINGECKO_API_KEY` | unset | Demo or Pro key; unset uses the keyless public API |
+| `COINGECKO_API_PLAN` | `demo` if a key is set, else `public` | `public`, `demo` or `pro` (Pro uses `pro-api.coingecko.com`) |
+| `CACHE_TTL_SECONDS` / `STALE_TTL_SECONDS` | `300` / `3600` | fresh / stale-on-error windows |
+| `UPSTREAM_CONNECT_TIMEOUT` / `UPSTREAM_READ_TIMEOUT` | `3.05` / `10` | seconds |
+| `UPSTREAM_RETRIES` | `2` | |
+| `BREAKER_FAILURES` / `BREAKER_RESET_SECONDS` | `5` / `60` | |
+| `DEFAULT_COIN` / `ALLOWED_COINS` | `bitcoin` / any | |
+| `RATE_LIMIT_CHART` / `RATE_LIMIT_DATA` | `20 per minute` / `60 per minute` | per client IP |
+| `RATE_LIMIT_STORAGE_URI` | `memory://` | use `redis://...` to share limits across instances |
+| `TRUSTED_PROXIES` | `0` | proxies whose `X-Forwarded-For` is trusted for client IPs |
+| `CORS_ORIGINS` | none | comma-separated |
+| `IMAGE_CACHE_MAX_MB` | `64` | per worker |
+| `WEB_CONCURRENCY` / `GUNICORN_THREADS` / `GUNICORN_TIMEOUT` | `2` / `4` / `45` | see `gunicorn.conf.py` |
+| `LOG_LEVEL` | `INFO` | logs are one JSON object per line, with `request_id` |
+
+## Deploy
+
+- **Docker:** the image is `python:3.12-slim` with DejaVu fonts, non-root, and a `HEALTHCHECK` on `/health`. It is about 790 MB, most of it Kaleido's bundled Chromium.
+- **Railway / Heroku-style:** `Procfile` and `nixpacks.toml` start `gunicorn -c gunicorn.conf.py chartsvc.wsgi:app`.
+
+Measured locally (1 worker): a cold chart request, including the CoinGecko call and Kaleido start-up, took about 1.4 s; the same chart from cache took 3 ms.
+
+## Development
+
 ```bash
-# Test single timeframe
-curl http://localhost:5000/generate?days=1
-
-# Test tweet endpoint
-curl http://localhost:5000/tweet?days=90
-
-# Test multi-timeframe
-curl http://localhost:5000/multi
-
-# Health check
-curl http://localhost:5000/health
+pip install -r requirements-dev.txt
+pytest --cov                              # upstream is a fake; sockets are blocked in tests
+ruff check chartsvc tests scripts gunicorn.conf.py
+python scripts/render_examples.py         # regenerate docs/media
 ```
 
-## 🎯 Key Features Summary
+```
+chartsvc/
+├── app.py          routes, error envelope, rate limits, security headers, request logs
+├── validation.py   strict query parsing
+├── coingecko.py    client: timeouts, retries, breaker, cache, payload validation
+├── cache.py        TTL cache with stale reads; bounded image LRU
+├── breaker.py      circuit breaker
+├── indicators.py   SMA, EMA, RSI
+├── render.py       Plotly figure + Kaleido export, themes
+├── openapi.py      OpenAPI 3.1 document (tests check it matches the routes)
+├── logs.py         JSON log formatter
+└── config.py       environment settings
+```
 
-| Feature | Description | Endpoint |
-|---------|-------------|----------|
-| **Professional Charts** | High-resolution candlestick charts with dark theme | `/generate` |
-| **Advanced TA** | Trend lines, MAs, RSI, pattern recognition | All endpoints |
-| **LLM Analysis** | ChatGPT-powered intelligent pattern selection | All endpoints |
-| **Tweet-Ready Data** | Social media optimized analysis and summaries | `/tweet` |
-| **Multi-Timeframe** | 4 timeframes in one comprehensive chart | `/multi` |
-| **Pattern Detection** | 15+ chart patterns with confidence levels | All endpoints |
-| **Professional Styling** | TradingView-quality visual design | All endpoints |
+## Changes in 2.0
 
-## 🚀 Production Ready
+2.0 turns the original single-token chart bot into a general, stateless chart service.
 
-This service is production-ready and includes:
-- ✅ **Error handling** and graceful fallbacks
-- ✅ **High-resolution output** (1920x1080, 3x scale)
-- ✅ **Professional styling** with consistent theming
-- ✅ **LLM integration** with mathematical fallback
-- ✅ **Multi-timeframe analysis** for comprehensive insights
-- ✅ **Tweet-ready output** for social media automation
-- ✅ **Railway deployment** with proper configuration
-- ✅ **Health monitoring** and status endpoints
+- `/generate`, `/tweet`, `/multi`, `/collage` and `/individual` are gone and answer `410` with a pointer to `/v1/chart`. They uploaded every image to a public storage bucket and returned its URL; images are now returned directly, which removes the storage credentials from the service.
+- Chart-pattern detection and LLM trading "signals" were removed. The signals were not reliable analysis and are out of scope for a rendering service.
+- The fake volume series (computed from candle ranges) was replaced by CoinGecko's real 24h volume, opt-in with `volume=true`.
+- The CoinGecko key is no longer in the source; it is read from `COINGECKO_API_KEY`.
 
-**Ready for professional trading analysis and social media automation!** 🎉
+## License
+
+[MIT](LICENSE) © Lashvin Manimaran. Market data © CoinGecko, used under its API terms.
