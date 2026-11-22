@@ -1,0 +1,8 @@
+"""Development server: ``python -m chartsvc`` (use gunicorn in production)."""
+
+import os
+
+from .app import create_app
+
+if __name__ == "__main__":
+    create_app().run(host="127.0.0.1", port=int(os.environ.get("PORT", "8000")), debug=False)
