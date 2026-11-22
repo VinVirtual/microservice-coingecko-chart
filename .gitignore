@@ -91,3 +91,9 @@ node_modules/
 # Temporary files
 *.tmp
 *.temp
+
+# Local virtualenvs and tool caches
+.venv*/
+.ruff_cache/
+.pytest_cache/
+.coverage
